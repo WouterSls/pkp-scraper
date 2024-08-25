@@ -1,16 +1,92 @@
-import { configs, configs_2 } from "./constants.js";
-import { display5Tickets, displayAllTickets } from "./helperFunctions.js";
+import { configs } from "./constants.js";
+import { displayAllTickets, sleep, } from "./helperFunctions.js";
 import puppeteer from "puppeteer";
+
+async function convertButtonsToLinks(page) {
+  try {
+    const links = await page.$$eval(".button.-full.-arrow.-sp", (buttons) =>
+      buttons.map((button) => ({
+        title: button.textContent.trim(),
+        link: button.href,
+      }))
+    );
+    return links;
+  } catch (error) {
+    console.log("no buttons found returning empty array");
+    return [];
+  }
+}
+
+async function fillForm(page, config) {
+  await page.type("#firstname", `${config.name}`);
+  await page.type("#lastname", `${config.lastname}`);
+  await page.type("#email", `${config.email}`);
+  await page.type("#code", `${config.code}`);
+
+  const checkbox = await page.$("#confirm");
+  const isChecked = await page.evaluate((el) => el.checked, checkbox);
+
+  if (!isChecked) {
+    await page.evaluate((el) => el.click(), checkbox);
+  } else {
+    throw new Error("error checking checkbox");
+  }
+}
+
+async function submitForm(page) {
+  try {
+    await page.focus("#btnNext");
+    await page.keyboard.press("Enter");
+    await page.waitForNavigation({ waitUntil: "networkidle0" });
+
+    await sleep(5000);
+    console.log("Form submitted successfully");
+    const currentUrl = await page.url();
+    console.log("Current page URL after submission attempt:", currentUrl);
+  } catch (error) {
+    console.error("Error submitting form:", error.message);
+
+    if (error.name === "TimeoutError") {
+      console.log("Navigation timeout occurred. Checking page state...");
+
+      // Check if the form is still present
+      const formPresent = await page.$("form.wide");
+      if (formPresent) {
+        console.log("Form is still present. Submission might have failed.");
+      } else {
+        console.log(
+          "Form is no longer present. Submission might have succeeded despite the timeout."
+        );
+      }
+
+      // Check for any error messages on the page
+      const errorMessages = await page.evaluate(() => {
+        const errors = Array.from(document.querySelectorAll(".form__message"));
+        return errors.map((e) => e.textContent.trim()).filter((e) => e !== "");
+      });
+
+      if (errorMessages.length > 0) {
+        console.log("Form submission errors:", errorMessages);
+      } else {
+        console.log("No error messages found on the page.");
+      }
+    }
+  }
+}
 
 // sunday no chill
 // "https://tickets.pukkelpop.be/nl/meetup/demand/day3/n/";
 // sunday chill
-// https://tickets.pukkelpop.be/nl/meetup/demand/day3/a/
+// "https://tickets.pukkelpop.be/nl/meetup/demand/day3/a/";
 // friday chill
 // https://tickets.pukkelpop.be/nl/meetup/demand/day1/a/
+// combi chill
+// https://tickets.pukkelpop.be/nl/meetup/demand/combi/a/
+// saturday no chill
+// https://tickets.pukkelpop.be/nl/meetup/demand/day2/n/
 const ticketToSearch = {
-  name: "friday chill",
-  link: "https://tickets.pukkelpop.be/nl/meetup/demand/day1/a/",
+  name: "saturday no chill",
+  link: "https://tickets.pukkelpop.be/nl/meetup/demand/day2/n/",
 };
 
 async function checkTicketAvailability() {
@@ -20,7 +96,7 @@ async function checkTicketAvailability() {
   console.log("setting up browser...");
 
   const browser = await puppeteer.launch({
-    headless: false,
+    headless: true,
     args: ["--no-sandbox", "--disable-setuid-sandbox"],
   });
   const page = await browser.newPage();
@@ -51,8 +127,6 @@ async function checkTicketAvailability() {
     const tickets = await convertButtonsToLinks(page);
 
     if (tickets.length > 0) {
-      console.log(`\nFound ${tickets.length} tickets.`);
-      console.log("-------------------------------------");
       displayAllTickets(tickets);
 
       //First ticket
@@ -71,7 +145,7 @@ async function checkTicketAvailability() {
 
           await fillForm(page, config);
           console.log("Form filled, attempting to submit...");
-          await submitForm1(page, config);
+          await submitForm(page, config);
           console.log(
             `Form submitted for config: ${config.email} successfully\n\n`
           );
@@ -100,148 +174,3 @@ async function checkTicketAvailability() {
 }
 
 checkTicketAvailability();
-
-async function convertButtonsToLinks(page) {
-  try {
-    const links = await page.$$eval(".button.-full.-arrow.-sp", (buttons) =>
-      buttons.map((button) => ({
-        title: button.textContent.trim(),
-        link: button.href,
-      }))
-    );
-    return links;
-  } catch (error) {
-    console.log("no buttons found returning empty array");
-    return [];
-  }
-}
-
-async function fillForm(page, config) {
-  await page.type("#firstname", `${config.name}`);
-  await page.type("#lastname", `${config.lastname}`);
-  await page.type("#email", `${config.email}`);
-  await page.type("#code", `${config.code}`);
-
-  await checkCheckbox(page, "#confirm");
-}
-
-async function submitForm1(page) {
-  try {
-    console.log("awaiting ...");
-    console.log("navigation oke");
-    //await page.waitForNavigation({ waitUntil: "networkidle0" });
-    console.log("click oke");
-    await page.click("#btnNext");
-
-    /**
-    await Promise.all([
-      page.click("#btnNext"),
-      page.waitForNavigation({ waitUntil: "networkidle0" }),
-    ]);
- */
-  } catch (error) {
-    console.error("Error submitting form:", error);
-    const errorMessages = await page.evaluate(() => {
-      const errors = Array.from(document.querySelectorAll(".form__message"));
-      return errors.map((e) => e.textContent.trim()).filter((e) => e !== "");
-    });
-    if (errorMessages.length > 0) {
-      console.log("Form submission errors:", errorMessages);
-    }
-    throw new Error(error);
-  }
-}
-
-async function submitForm(page) {
-  const timeout = 60000; // Increase timeout to 60 seconds
-  try {
-    console.log("Attempting to submit form...");
-    await Promise.all([
-      page.click("#btnNext"),
-      page.waitForNavigation({
-        waitUntil: "networkidle0",
-        timeout: timeout,
-      }),
-    ]);
-    console.log("Form submitted successfully");
-  } catch (error) {
-    console.error("Error submitting form:", error.message);
-
-    if (error.name === "TimeoutError") {
-      console.log("Navigation timeout occurred. Checking page state...");
-
-      // Check if the form is still present
-      const formPresent = await page.$("form.wide");
-      if (formPresent) {
-        console.log("Form is still present. Submission might have failed.");
-      } else {
-        console.log(
-          "Form is no longer present. Submission might have succeeded despite the timeout."
-        );
-      }
-
-      // Check for any error messages on the page
-      const errorMessages = await page.evaluate(() => {
-        const errors = Array.from(document.querySelectorAll(".form__message"));
-        return errors.map((e) => e.textContent.trim()).filter((e) => e !== "");
-      });
-
-      if (errorMessages.length > 0) {
-        console.log("Form submission errors:", errorMessages);
-      } else {
-        console.log("No error messages found on the page.");
-      }
-    }
-  }
-
-  // Additional check to determine if we're on a new page
-  const currentUrl = await page.url();
-  console.log("Current page URL after submission attempt:", currentUrl);
-}
-
-async function checkCheckbox(page, selector) {
-  const checkbox = await page.$(selector);
-  const isChecked = await page.evaluate((el) => el.checked, checkbox);
-
-  if (!isChecked) {
-    await page.evaluate((el) => el.click(), checkbox);
-  } else {
-    throw new Error("error checking checkbox");
-  }
-}
-
-async function navigateWithResourceCheck(page, url) {
-  // Start monitoring network requests
-  const pendingRequests = new Set();
-  page.on("request", (request) => pendingRequests.add(request));
-  page.on("requestfinished", (request) => pendingRequests.delete(request));
-  page.on("requestfailed", (request) => pendingRequests.delete(request));
-
-  // Navigate to the page
-  await page.goto(url, { waitUntil: "networkidle0", timeout: 60000 });
-
-  // Wait for any remaining requests to complete
-  while (pendingRequests.size > 0) {
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    console.log(`Waiting for ${pendingRequests.size} requests to complete...`);
-  }
-
-  // Additional check for page readiness
-  await page.evaluate(() => {
-    return new Promise((resolve) => {
-      if (document.readyState === "complete") {
-        resolve();
-      } else {
-        window.addEventListener("load", resolve);
-      }
-    });
-  });
-
-  console.log("Navigation and resource loading complete");
-}
-
-async function sleep(ms) {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
-}
